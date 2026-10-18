@@ -1,180 +1,197 @@
-
 <!DOCTYPE html>
 <html lang="nl">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Second Life SyncWatch TV</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Second Life YouTube SyncWatch TV</title>
 <style>
-html,body {
-  margin:0;
-  width:100%;
-  height:100%;
-  overflow:hidden;
-  background:#000;
-  font-family:Arial,sans-serif;
-}
-#yt {
-  position:absolute;
-  inset:0;
-  width:100%;
-  height:100%;
-}
-#status {
-  position:absolute;
-  top:10px;
-  left:10px;
-  padding:8px;
-  color:white;
-  background:#0009;
-  pointer-events:none;
-}
-#sound {
-  position:absolute;
-  bottom:12px;
-  right:12px;
-  padding:10px;
-  background:#222;
-  color:white;
-  border:1px solid #aaa;
-  cursor:pointer;
-}
+  html, body { margin:0; width:100%; height:100%; overflow:hidden; background:#000; font-family:Arial,sans-serif; }
+  #yt, #yt iframe { position:absolute; inset:0; width:100%; height:100%; border:0; }
+  #status { position:absolute; left:12px; top:12px; max-width:calc(100% - 48px); padding:8px 12px; color:#fff; background:rgba(0,0,0,.75); font-size:17px; border-radius:5px; pointer-events:none; }
+  button { color:#fff; background:rgba(20,20,20,.94); border:1px solid #aaa; border-radius:6px; padding:13px 17px; cursor:pointer; font-weight:bold; }
+  #startButton { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); font-size:20px; min-width:220px; }
+  #soundButton { position:absolute; bottom:12px; right:12px; font-size:16px; }
+  [hidden] { display:none !important; }
 </style>
 </head>
 <body>
-<div id="yt"></div>
-<div id="status">SyncWatch TV</div>
-<button id="sound">Geluid aan / Start</button>
-
+  <div id="yt"></div>
+  <div id="status">SyncWatch laden...</div>
+  <button id="startButton" hidden>▶ Klik om te starten</button>
+  <button id="soundButton" hidden>🔊 Geluid aan</button>
 <script>
-const q = new URLSearchParams(location.search);
-const id = q.get("v") || "";
-const start = Number(q.get("start") || 0);
-const offset = Number(q.get("offset") || 0);
-const paused = q.get("paused") === "1";
+(function () {
+  'use strict';
+  var query = new URLSearchParams(window.location.search);
+  var id = (query.get('v') || '').trim();
+  var startParam = Number(query.get('start'));
+  var startTime = Number.isFinite(startParam) && startParam > 0
+    ? startParam : Date.now() / 1000;
+  var offsetParam = Number(query.get('offset'));
+  var offset = Number.isFinite(offsetParam) ? Math.max(0, offsetParam) : 0;
+  var paused = query.get('paused') === '1';
+  var status = document.getElementById('status');
+  var startButton = document.getElementById('startButton');
+  var soundButton = document.getElementById('soundButton');
+  var player = null;
+  var ready = false;
+  var loaded = false;
+  var blocked = false;
+  var loadAttemptAt = 0;
+  var lastSeekAt = 0;
+  var playAttempts = 0;
+  var lastPlayAttemptAt = 0;
+  var fatalError = false;
 
-const status = document.getElementById("status");
-const sound = document.getElementById("sound");
-
-let player;
-let ready = false;
-let begun = false;
-
-function targetTime() {
-  if (paused) return Math.max(0,offset);
-  return Math.max(
-    0, offset + Date.now()/1000 - start
-  );
-}
-
-function onYouTubeIframeAPIReady() {
-  player = new YT.Player("yt", {
-    width:"100%",
-    height:"100%",
-    videoId:id,
-    playerVars:{
-      playsinline:1,
-      controls:1,
-      rel:0,
-      origin:location.origin
-    },
-    events:{
-      onReady:function(e) {
-        ready = true;
-        e.target.mute();
-        e.target.cueVideoById({
-          videoId:id,
-          startSeconds:Math.floor(offset)
-        });
-        sync();
-      },
-      onError:function(e) {
-        status.textContent =
-          "YouTube-fout: " + e.data;
-      }
+  function message(text) {
+    status.textContent = text;
+    status.hidden = !text;
+  }
+  function targetSeconds() {
+    return Math.max(0, offset + (paused ? 0 : Date.now() / 1000 - startTime));
+  }
+  function showManual(text) {
+    blocked = true;
+    startButton.hidden = false;
+    message(text || 'Klik op START om de video af te spelen.');
+  }
+  function seekIfNeeded() {
+    var now = Date.now();
+    if (now - lastSeekAt < 5000) return;
+    var target = targetSeconds();
+    var at = player.getCurrentTime();
+    if (Number.isFinite(at) && Math.abs(at - target) > 3) {
+      lastSeekAt = now;
+      player.seekTo(target, true);
     }
-  });
-}
-
-function sync() {
-  if (!ready) return;
-
-  if (paused) {
-    player.pauseVideo();
-    status.textContent = "Gepauzeerd";
-    return;
   }
-
-  const remaining = start - Date.now()/1000;
-
-  if (remaining > 0) {
-    status.textContent =
-      "Start over " + Math.ceil(remaining) + " sec";
-    return;
-  }
-
-  const target = targetTime();
-  const duration = player.getDuration();
-
-  if (duration > 0 && target >= duration) {
-    player.pauseVideo();
-    status.textContent = "Video afgelopen";
-    return;
-  }
-
-  if (!begun) {
-    begun = true;
-    player.loadVideoById({
-      videoId:id,
-      startSeconds:target
-    });
-    return;
-  }
-
-  const state = player.getPlayerState();
-
-  if (state === YT.PlayerState.PLAYING) {
-    const difference =
-      Math.abs(player.getCurrentTime() - target);
-
-    if (difference > 2) {
-      player.seekTo(target,true);
+  function sync() {
+    if (!ready || fatalError) return;
+    var now = Date.now();
+    var state = player.getPlayerState();
+    if (paused) {
+      if (state === YT.PlayerState.PLAYING) player.pauseVideo();
+      if (state === YT.PlayerState.PAUSED) seekIfNeeded();
+      message('Gepauzeerd · wacht op PLAY via de tv');
+      return;
     }
-    status.textContent = "";
-  }
-  else if (
-    state === YT.PlayerState.PAUSED ||
-    state === YT.PlayerState.CUED
-  ) {
-    player.playVideo();
-  }
-}
-
-sound.onclick = function() {
-  if (!ready) return;
-  player.unMute();
-  if (!paused && Date.now()/1000 >= start) {
-    if (!begun) {
-      begun = true;
-      player.loadVideoById({
-        videoId:id,
-        startSeconds:targetTime()
-      });
-    } else {
+    var remaining = startTime - now / 1000;
+    if (remaining > 0) {
+      message('Start over ' + Math.ceil(remaining) + ' seconden');
+      return;
+    }
+    var duration = player.getDuration();
+    if (duration > 0 && targetSeconds() >= duration) {
+      player.pauseVideo();
+      message('Video afgelopen · kies een nieuwe video');
+      startButton.hidden = true;
+      return;
+    }
+    if (!loaded) {
+      loaded = true;
+      loadAttemptAt = now;
+      message('YouTube-video starten...');
+      // loadVideoById starts playing at the current shared timestamp.
+      // Start muted, because many embedded browsers block autoplay with audio.
+      player.mute();
+      player.loadVideoById({ videoId: id, startSeconds: targetSeconds() });
+      return;
+    }
+    if (state === YT.PlayerState.PLAYING) {
+      blocked = false;
+      startButton.hidden = true;
+      soundButton.hidden = !player.isMuted();
+      message('');
+      seekIfNeeded();
+      return;
+    }
+    if (state === YT.PlayerState.BUFFERING) {
+      message('Video bufferen...');
+      if (now - loadAttemptAt > 20000) showManual('Video laadt traag. Klik START om te proberen.');
+      return;
+    }
+    if (blocked) return;
+    if (now - lastPlayAttemptAt > 4000 && playAttempts < 2) {
+      playAttempts++;
+      lastPlayAttemptAt = now;
       player.playVideo();
+      message('Afspelen aanvragen...');
+    } else if (now - loadAttemptAt > 9000) {
+      showManual('Automatisch afspelen geblokkeerd. Klik START.');
     }
   }
-};
 
-if (/^[A-Za-z0-9_-]{11}$/.test(id)) {
-  const script = document.createElement("script");
-  script.src = "https://www.youtube.com/iframe_api";
+  startButton.onclick = function () {
+    if (!ready || paused || fatalError) return;
+    blocked = false;
+    startButton.hidden = true;
+    soundButton.hidden = true;
+    loaded = true;
+    loadAttemptAt = Date.now();
+    player.loadVideoById({ videoId: id, startSeconds: targetSeconds() });
+    player.unMute();
+    player.playVideo();
+    message('Video starten...');
+  };
+  soundButton.onclick = function () {
+    if (!ready) return;
+    player.unMute();
+    soundButton.hidden = true;
+  };
+
+  window.onYouTubeIframeAPIReady = function () {
+    player = new YT.Player('yt', {
+      width: '100%', height: '100%', videoId: id,
+      playerVars: {
+        playsinline: 1, controls: 1, rel: 0,
+        origin: window.location.origin
+      },
+      events: {
+        onReady: function (event) {
+          ready = true;
+          event.target.mute();
+          soundButton.hidden = false;
+          if (paused) {
+            event.target.cueVideoById({ videoId: id, startSeconds: offset });
+          }
+          sync();
+        },
+        onStateChange: function (event) {
+          if (event.data === YT.PlayerState.PLAYING) {
+            blocked = false;
+            startButton.hidden = true;
+            message('');
+          }
+        },
+        onAutoplayBlocked: function () {
+          showManual('Automatisch afspelen geblokkeerd. Klik START.');
+        },
+        onError: function (event) {
+          fatalError = true;
+          startButton.hidden = true;
+          var e = event.data;
+          var explain = (e === 100) ? 'Video niet beschikbaar' :
+            (e === 101 || e === 150) ? 'Eigenaar staat insluiten niet toe' :
+            (e === 153) ? 'YouTube weigert deze ingebouwde browser (fout 153)' :
+            (e === 2) ? 'Ongeldige video-ID' :
+            ('YouTube-fout ' + e);
+          message(explain + '. Probeer een andere video of bekijk hem op YouTube.');
+        }
+      }
+    });
+  };
+
+  if (!/^[A-Za-z0-9_-]{11}$/.test(id)) {
+    message('Geen geldige YouTube-video gekozen. Gebruik het LINK-menu op de tv.');
+    return;
+  }
+  var script = document.createElement('script');
+  script.src = 'https://www.youtube.com/iframe_api';
+  script.onerror = function () { message('Kan de YouTube API niet laden.'); };
   document.head.appendChild(script);
-} else {
-  status.textContent = "Wachten op YouTube-link...";
-}
-
-setInterval(sync,1000);
+  setInterval(sync, 1000);
+})();
 </script>
 </body>
 </html>
