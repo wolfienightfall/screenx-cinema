@@ -4,110 +4,111 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ScreenX Cinema Player</title>
+<title>ScreenX Cinema</title>
 <style>
-  html, body {
+html, body {
     margin: 0;
     width: 100%;
     height: 100%;
-    overflow: hidden;
     background: black;
-  }
-  video {
+    overflow: hidden;
+}
+video {
     width: 100%;
     height: 100%;
-    object-fit: contain;
-  }
-  #status {
+    object-fit: fill;
+}
+#status {
     position: absolute;
     top: 45%;
     width: 100%;
-    text-align: center;
     color: white;
+    text-align: center;
     font: 18px Arial;
-  }
-  #audio {
+}
+#sound {
     position: absolute;
-    right: 12px;
-    bottom: 12px;
-    display: none;
+    bottom: 15px;
+    right: 15px;
     padding: 10px;
-    cursor: pointer;
-  }
+    display: none;
+}
 </style>
 </head>
 <body>
 
-<video id="movie" playsinline muted preload="auto"></video>
-<div id="status">Wachten op ScreenX START...</div>
-<button id="audio">Geluid aan</button>
+<video id="movie" muted playsinline preload="auto"></video>
+<div id="status">ScreenX Cinema - Ready</div>
+<button id="sound">Geluid aan</button>
 
 <script>
 const params = new URLSearchParams(location.search);
-const panel = (params.get("panel") || "center").toLowerCase();
+
+const panel = params.get("panel") || "center";
 const start = Number(params.get("start") || 0);
 
-const movies = {
-  left: "flug_left.mp4",
-  center: "flug_center.mp4",
-  right: "flug_right.mp4"
+const files = {
+    left: "flug_left.mp4",
+    center: "flug_center.mp4",
+    right: "flug_right.mp4"
 };
 
 const video = document.getElementById("movie");
 const status = document.getElementById("status");
-const audio = document.getElementById("audio");
+const sound = document.getElementById("sound");
 
-video.src = movies[panel] || movies.center;
-video.muted = true;
+video.src = files[panel] || files.center;
 
 if (panel === "center") {
-  audio.style.display = "block";
-  audio.onclick = () => {
-    video.muted = false;
-    audio.style.display = "none";
-    video.play().catch(() => {});
-  };
+    sound.style.display = "block";
+    sound.onclick = () => {
+        video.muted = false;
+        sound.style.display = "none";
+        video.play().catch(() => {});
+    };
 }
 
-function synchronize() {
-  if (!start) return;
+function sync() {
+    if (!start) {
+        status.textContent = "Waiting for START";
+        return;
+    }
 
-  const now = Date.now() / 1000;
-  const elapsed = now - start;
+    const elapsed = Date.now() / 1000 - start;
 
-  if (elapsed < 0) {
-    status.textContent =
-      "Start over " + Math.ceil(-elapsed) + " sec";
-    return;
-  }
+    if (elapsed < 0) {
+        status.textContent =
+            "Starting in " + Math.ceil(-elapsed);
+        return;
+    }
 
-  if (video.readyState < 1) {
-    status.textContent = "Video laden...";
-    return;
-  }
+    if (!Number.isFinite(video.duration)) {
+        status.textContent = "Loading video...";
+        return;
+    }
 
-  if (elapsed >= video.duration) {
-    video.pause();
-    status.textContent = "Einde";
-    return;
-  }
+    if (elapsed >= video.duration) {
+        video.pause();
+        status.textContent = "Movie finished";
+        return;
+    }
 
-  status.textContent = "";
+    if (Math.abs(video.currentTime - elapsed) > 0.5) {
+        video.currentTime = elapsed;
+    }
 
-  if (Math.abs(video.currentTime - elapsed) > 0.3) {
-    video.currentTime = elapsed;
-  }
-
-  if (video.paused) {
-    video.play().catch(() => {
-      status.textContent = "Klik om af te spelen";
-    });
-  }
+    if (video.paused) {
+        video.play().catch(() => {
+            status.textContent = "Click to play";
+        });
+    } else {
+        status.textContent = "";
+    }
 }
 
-setInterval(synchronize, 300);
+video.addEventListener("loadedmetadata", sync);
+setInterval(sync, 500);
 </script>
 
 </body>
 </html>
-
